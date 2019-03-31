@@ -12,6 +12,7 @@ const char output_file_type[] = ".bzip";
 
 char buffer_output[buffer_size];
 int output = 0;
+int first_write = 0;
 
 int zip(char* filename);
 int unzipRLE(char* filename);
@@ -73,6 +74,18 @@ int zip(char * filename) {
   int new_char = 0;
   char run_char = ' ';
 
+  char* dir_string = strdup(filename);
+  char* file_string = strdup(filename);
+
+  char* dir = dirname(dir_string);
+  strcat(dir, "/");
+  char* file_output_name = basename(file_string);
+
+  file_output_name = swap_extension(file_output_name);
+  strcat(dir, file_output_name);
+
+  remove(dir);
+
   while (fgets(buffer, buffer_size, file_input)) {
     for (int i = 0; i < buffer_size; i++) {
       buffer_output[i] = '\0';
@@ -123,7 +136,7 @@ int save_buffer(char* filename) {
 
   printf("%s\n", dir);
 
-  file_output = fopen(dir, "w");
+  file_output = fopen(dir, "a");
   fprintf(file_output, buffer_output);
   fclose(file_output);
 
