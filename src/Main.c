@@ -31,6 +31,7 @@ void* zip(void* filename);
 void* p_save_buffer(void* file);
 int file_size(char* filename);
 
+// data structure for pthreads
 struct file_info {
   char* filename;
   char* file_type;
@@ -42,12 +43,12 @@ int main(int argc, char** argv) {
   if (argc != 3) {
     if (strcmp(argv[2], "-unzip") == 0) {
       if (argc != 4) {
-      //  if (strcmp(argv[4], "-p") == 0) { enable_pthreads = 1; }
-      //  else {
+       if (strcmp(argv[4], "-p") == 0) { enable_pthreads = 1; }
+       else {
           printf("Error:\tincorrect commandline arguments\n");
           printf("Format:\t./<program> <filename> <-unzip> <filetype> <-p (for pthreads)>\n");
           return -1;
-      //  }
+       }
       } else {
         unzip_file_type = argv[3];
       }
@@ -69,6 +70,7 @@ int main(int argc, char** argv) {
   strcpy(command, argv[2]);
 
   if (enable_pthreads == 0) {
+    // Sequential compression method calls
     if (strcmp(command, zip_command) == 0) {
         zipRLE(filename);
     } else if (strcmp(command, unzip_command) == 0) {
@@ -78,16 +80,19 @@ int main(int argc, char** argv) {
       printf("Error:\t%s is not a valid command.\n", command);
     }
   } else {
+    // concurrent compression method calls
     pthread_cond_init(&buffer_ready, NULL);
     pthread_mutex_init(&write, NULL);
     size_t file_length = file_size(filename);
     printf("FL : %d\n\n", (int)file_length / NUM_THREADS);
     if (strcmp(command, zip_command) == 0) {
+      // 2 threads to read, 2 threads to write
       pthread_t read_thread_1 = 1;
       pthread_t read_thread_2 = 2;
       pthread_t write_thread_1 = 3;
       pthread_t write_thread_2 = 4;
 
+      // calculate the bounds each reader thread works within
       struct file_info f = { filename, zip_file_type, 0, (int)file_length/NUM_THREADS };
       struct file_info f2 = { filename, zip_file_type, (int)file_length/NUM_THREADS, (int)file_length };
 
@@ -124,35 +129,43 @@ int main(int argc, char** argv) {
         exit(-1);
       }
     } else if (strcmp(command, unzip_command) == 0) {
+      // unzipping was not implemented concurrently
       pthread_t thread_id = 1;
       pthread_create(&thread_id, NULL, unzip, (void*) filename);
-  //    pthread_join(thread_id, NULL);
+      pthread_join(thread_id, NULL);
     }
   }
 
   return 0;
 }
 
+// used to save the run to the output buffer
 void output_run(int count, char run) {
   printf("%d%c\n", count, run);
+  // if the run length is more than 1 digit
   if (count >= 10) {
     int num_digits = 0;
     int c = count;
+    // determine the number of digits in the run length
     while (c != 0) {
       c = c / 10;
       num_digits++;
     }
+    // read the next int value from the buffer
     char num[num_digits-1];
     sprintf(num, "%d", count);
     for (int i = 0; i < num_digits; i++) {
+      // multiple digit integer saving to buffer
       buffer_output[output++] = num[i];
-    }
+    } // easy conversion from int to char
   } else { buffer_output[output++] = count + '0'; }
 
+  // last char is the given character for the run
   buffer_output[output++] = run;
   printf("Buffer; %s\n", buffer_output);
 }
 
+// sequential RLE
 void zipRLE(char * filename) {
   FILE *file_input;
   char buffer[buffer_size];
@@ -163,30 +176,38 @@ void zipRLE(char * filename) {
   char run_char = ' ';
 
   while (fgets(buffer, buffer_size, file_input)) {
+    // initialize/clear buffer
     for (int i = 0; i < buffer_size; i++) {
       buffer_output[i] = '\0';
     }
     for (int i = 0; i < buffer_size; i++) {
+      // condition for end of line
       if (buffer[i] == '\0') {
         // buffer_output[output++] = '\0';
         buffer_output[output++] = '\n';
         printf("Final buffer: %s\n", buffer_output);
         output = 0;
+
+        // output the final buffer for the line
         save_buffer(filename, zip_file_type);
         break;
       }
-
+      // the first character in the read buffer is selected immediately
       if (i == 0) {
         count++;
         run_char = buffer[i];
       }
+      // calculate length of run
       else if (buffer[i] == buffer[i-1]) {
         if (new_char == 1) {
           new_char = 0;
         } else count++;
       }
+      // condition for when run ends
       else if (buffer[i] != buffer[i-1]) {
+        // save run to buffer
         output_run(count, run_char);
+        // flag to say new character run has started
         new_char = 1;
         count = 1;
         run_char = buffer[i];
@@ -196,8 +217,11 @@ void zipRLE(char * filename) {
   fclose(file_input);
 }
 
+// Writer thread method
+// takes the buffer and writes it to the output file
 void* p_save_buffer(void* filename) {
   pthread_mutex_lock(&write);
+  // wait until the reader thread signals that the buffer is ready
   pthread_cond_wait(&buffer_ready, &write);
 
   struct file_info *file = (struct file_info*) filename;
@@ -205,9 +229,14 @@ void* p_save_buffer(void* filename) {
   char* dir_string = strdup(file->filename);
   char* file_string = strdup(file->filename);
 
+  // determine the directory name
   char* dir = dirname(dir_string);
   strcat(dir, "/");
+
+  // separate the filename from the directory
   char* file_output_name = basename(file_string);
+
+  // change file extension to the compressed format
   file_output_name = swap_extension(file_output_name, file->file_type);
   printf("Howdy from %ld: %s\n ", pthread_self(), p_buffer_output);
 
@@ -221,19 +250,22 @@ void* unzip(void* filename) {
   printf("%s", file);
 }
 
+// Reader thread method
+// Same as the sequential method, but only reads the file from
+// within the range specified
 void* zip(void* filename) {
   char* file;
-  file = (char*) filename;
   char buffer[buffer_size];
   struct file_info *fi = (struct file_info*) filename;
-  printf("\n\t\t\t\t\tL: %d\n", fi->lower_bound);
-
+  file = fi->filename;
   int count = 0;
   int new_char = 0;
   char run_char = ' ';
 
   FILE* f;
+  printf("B");
   f = fopen(file, "r");
+  printf("A");
   fseek(f, fi->upper_bound, SEEK_SET);
   printf("Bound: %d, %d\n", fi->lower_bound, fi->upper_bound);
   while(fgets(buffer, buffer_size, f)) {
@@ -251,22 +283,28 @@ void* zip(void* filename) {
         if (pthread_cond_signal(&buffer_ready)) {
           printf("Error signalling thread\n");
         }
+        // reset position in buffer
         output = 0;
-        //save_buffer(filename, zip_file_type);
+        // save the current buffer to the output file
+        save_buffer(filename, zip_file_type);
         break;
       }
-
+      // the first character in the read buffer is selected immediately
       if (i == 0) {
         count++;
         run_char = buffer[i];
       }
+      // calculate length of run
       else if (buffer[i] == buffer[i-1]) {
         if (new_char == 1) {
           new_char = 0;
         } else count++;
       }
+      // condition for when run ends
       else if (buffer[i] != buffer[i-1]) {
+        // save run to buffer
         output_run(count, run_char);
+        // flag to say new character run has started
         new_char = 1;
         count = 1;
         run_char = buffer[i];
@@ -285,21 +323,27 @@ void save_buffer(char* filename, char* file_type) {
   char* dir_string = strdup(filename);
   char* file_string = strdup(filename);
 
+  // same as the concurrent method
   char* dir = dirname(dir_string);
   strcat(dir, "/");
   char* file_output_name = basename(file_string);
 
   file_output_name = swap_extension(file_output_name, file_type);
   strcat(dir, file_output_name);
+
+  // delete the output file if it exists already
   remove(dir);
 
   printf("%s\n", dir);
 
+  // open and print to the end of the file
   file_output = fopen(dir, "a");
   fprintf(file_output, buffer_output);
   fclose(file_output);
 }
 
+// determine the size of the file
+// used for bounding the threads
 int file_size(char* filename) {
   FILE * f;
   f = fopen(filename, "r");
@@ -324,22 +368,17 @@ char* swap_extension(char* file, char* file_type) {
   return new_file;
 }
 
+// sequentially decompressed the file
 void unzipRLE(char* filename) {
   printf("Unzipping %s...\n", filename);
   char buffer[buffer_size];
 
   FILE *file_input;
-  char* dir_string = strdup(filename);
-  char* file_string = strdup(filename);
-
-  char* dir = dirname(dir_string);
-  strcat(dir, "/");
-  char* file_input_name = basename(file_string);
-
   file_input = fopen(filename, "r");
 
   while(fgets(buffer, buffer_size, file_input)) {
     printf("buffer: %s\n", buffer);
+    // initialize/clear buffer
     for (int i = 0; i < buffer_size; i++) {
      buffer_output[i] = '\0';
     }
@@ -348,9 +387,14 @@ void unzipRLE(char* filename) {
     int n = 0;
     int index = 0;
     char prev_char;
+    // copy the buffer to a string
     char* str = buffer;
+    // scan the string for an int, char, and the number of characters read
     while (sscanf(str, "%d%c%n", &run_size, &ch, &n)) {
+      // offset the string
       str += n;
+
+      // end of line if the char repeats
       if (ch == prev_char) {
         buffer_output[index++] = '\n';
         break;
@@ -359,7 +403,8 @@ void unzipRLE(char* filename) {
       prev_char = ch;
       printf("%d\n", n);
       printf("RUN: %d, CHAR: %c\n", run_size, ch);
-      char expanded[buffer_size];
+
+      // expand the run in the output buffer
       for (int i = 0; i < run_size; i++) {
         buffer_output[index++] = ch;
       }
