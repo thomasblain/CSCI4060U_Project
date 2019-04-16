@@ -239,6 +239,15 @@ void* p_save_buffer(void* filename) {
   // change file extension to the compressed format
   file_output_name = swap_extension(file_output_name, file->file_type);
   printf("Howdy from %ld: %s\n ", pthread_self(), p_buffer_output);
+  FILE* f;
+  char* fi = file->filename;
+
+  // write the buffer within bounds
+  f = fopen(fi, "w");
+  fseek(f, file->lower_bound, SEEK_SET);
+  fprintf(f, p_buffer_output);
+
+  fclose(f);
 
   pthread_mutex_unlock(&write);
   pthread_exit(NULL);
@@ -251,8 +260,7 @@ void* unzip(void* filename) {
 }
 
 // Reader thread method
-// Same as the sequential method, but only reads the file from
-// within the range specified
+// Same as the sequential method, but only reads the f
 void* zip(void* filename) {
   char* file;
   char buffer[buffer_size];
@@ -263,10 +271,8 @@ void* zip(void* filename) {
   char run_char = ' ';
 
   FILE* f;
-  printf("B");
   f = fopen(file, "r");
-  printf("A");
-  fseek(f, fi->upper_bound, SEEK_SET);
+  fseek(f, fi->lower_bound, SEEK_SET);
   printf("Bound: %d, %d\n", fi->lower_bound, fi->upper_bound);
   while(fgets(buffer, buffer_size, f)) {
     for (int i = 0; i < buffer_size; i++) {
@@ -286,7 +292,7 @@ void* zip(void* filename) {
         // reset position in buffer
         output = 0;
         // save the current buffer to the output file
-        save_buffer(filename, zip_file_type);
+        //save_buffer(filename, zip_file_type);
         break;
       }
       // the first character in the read buffer is selected immediately
@@ -304,7 +310,6 @@ void* zip(void* filename) {
       else if (buffer[i] != buffer[i-1]) {
         // save run to buffer
         output_run(count, run_char);
-        // flag to say new character run has started
         new_char = 1;
         count = 1;
         run_char = buffer[i];
@@ -323,27 +328,21 @@ void save_buffer(char* filename, char* file_type) {
   char* dir_string = strdup(filename);
   char* file_string = strdup(filename);
 
-  // same as the concurrent method
   char* dir = dirname(dir_string);
   strcat(dir, "/");
   char* file_output_name = basename(file_string);
 
   file_output_name = swap_extension(file_output_name, file_type);
   strcat(dir, file_output_name);
-
-  // delete the output file if it exists already
   remove(dir);
 
   printf("%s\n", dir);
 
-  // open and print to the end of the file
   file_output = fopen(dir, "a");
   fprintf(file_output, buffer_output);
   fclose(file_output);
 }
 
-// determine the size of the file
-// used for bounding the threads
 int file_size(char* filename) {
   FILE * f;
   f = fopen(filename, "r");
@@ -368,17 +367,22 @@ char* swap_extension(char* file, char* file_type) {
   return new_file;
 }
 
-// sequentially decompressed the file
 void unzipRLE(char* filename) {
   printf("Unzipping %s...\n", filename);
   char buffer[buffer_size];
 
   FILE *file_input;
+  char* dir_string = strdup(filename);
+  char* file_string = strdup(filename);
+
+  char* dir = dirname(dir_string);
+  strcat(dir, "/");
+  char* file_input_name = basename(file_string);
+
   file_input = fopen(filename, "r");
 
   while(fgets(buffer, buffer_size, file_input)) {
     printf("buffer: %s\n", buffer);
-    // initialize/clear buffer
     for (int i = 0; i < buffer_size; i++) {
      buffer_output[i] = '\0';
     }
@@ -387,14 +391,9 @@ void unzipRLE(char* filename) {
     int n = 0;
     int index = 0;
     char prev_char;
-    // copy the buffer to a string
     char* str = buffer;
-    // scan the string for an int, char, and the number of characters read
     while (sscanf(str, "%d%c%n", &run_size, &ch, &n)) {
-      // offset the string
       str += n;
-
-      // end of line if the char repeats
       if (ch == prev_char) {
         buffer_output[index++] = '\n';
         break;
@@ -403,8 +402,7 @@ void unzipRLE(char* filename) {
       prev_char = ch;
       printf("%d\n", n);
       printf("RUN: %d, CHAR: %c\n", run_size, ch);
-
-      // expand the run in the output buffer
+      char expanded[buffer_size];
       for (int i = 0; i < run_size; i++) {
         buffer_output[index++] = ch;
       }
